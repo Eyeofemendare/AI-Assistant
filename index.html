@@ -241,11 +241,11 @@
                 try {
                     const context = files
                         .filter(f => selectedFiles.length === 0 || selectedFiles.includes(f.path))
-                        .map(f => `ΠΗΓΗ ${f.name}: ${f.content.substring(0, 2000)}`) // Reduced context for stability
+                        .map(f => `ΠΗΓΗ ${f.name}: ${f.content.substring(0, 2000)}`)
                         .join("\n\n");
 
-                    // Changed to gemini-1.5-flash for better stability and lower error rates
-                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                    // Διόρθωση: Χρήση του "gemini-1.5-flash-latest" για καλύτερη συμβατότητα με v1beta
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -276,7 +276,7 @@
                     }
                 } catch (err) {
                     console.error("Chat Error Trace:", err);
-                    setChatHistory(prev => [...prev, { role: 'assistant', text: `Σφάλμα Συστήματος: ${err.message}. Βεβαιωθείτε ότι το API Key είναι έγκυρο και ενεργό.` }]);
+                    setChatHistory(prev => [...prev, { role: 'assistant', text: `Σφάλμα Συστήματος: ${err.message}. Δοκιμάστε να χρησιμοποιήσετε το gemini-1.5-flash-latest αν το σφάλμα επιμένει.` }]);
                 } finally {
                     setIsAiLoading(false);
                 }
