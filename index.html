@@ -30,7 +30,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         
-        // Ορισμός του API Key ως κενό string για χρήση του εσωτερικού περιβάλλοντος αν δεν δοθεί άλλο
+        // Ορισμός του API Key ως κενό string για χρήση του εσωτερικού περιβάλλοντος
         const defaultApiKey = "";
 
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -97,7 +97,6 @@
             const chatEndRef = useRef(null);
             const folderInputRef = useRef(null);
             
-            // Το κλειδί πλέον αρχικοποιείται από το localStorage αλλά δεν είναι υποχρεωτικό για τη λειτουργία της εφαρμογής
             const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || "");
 
             useEffect(() => {
@@ -109,9 +108,7 @@
             }, []);
 
             useEffect(() => {
-                if (apiKey) {
-                    localStorage.setItem('gemini_api_key', apiKey);
-                }
+                localStorage.setItem('gemini_api_key', apiKey);
             }, [apiKey]);
 
             useEffect(() => {
@@ -198,6 +195,38 @@
                 setIsScanning(false);
             };
 
+            // Λειτουργία κλήσης API με Exponential Backoff
+            const callGeminiWithRetry = async (input, context, key, retries = 5) => {
+                const model = "gemini-2.5-flash-preview-09-2025";
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+                
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        const response = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: input }] }],
+                                systemInstruction: { parts: [{ text: `Απάντησε στα Ελληνικά βάσει αυτών των δεδομένων: ${context}` }] }
+                            })
+                        });
+
+                        if (response.ok) return await response.json();
+                        
+                        if (response.status === 429 || response.status >= 500) {
+                            const delay = Math.pow(2, i) * 1000;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue;
+                        }
+
+                        const errorBody = await response.json();
+                        throw new Error(errorBody.error?.message || "Σφάλμα API");
+                    } catch (err) {
+                        if (i === retries - 1) throw err;
+                    }
+                }
+            };
+
             const handleSendMessage = async () => {
                 if (!userInput.trim() || isAiLoading) return;
                 const input = userInput;
@@ -211,29 +240,20 @@
                         .map(f => `ΠΗΓΗ ${f.name}: ${f.content.substring(0, 3000)}`)
                         .join("\n\n");
 
-                    // Χρήση του παρεχόμενου κλειδιού ή του προεπιλεγμένου κενού για το εσωτερικό API
                     const currentKey = apiKey || defaultApiKey;
-                    const model = "gemini-2.5-flash-preview-09-2025";
-
-                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${currentKey}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: input }] }],
-                            systemInstruction: { parts: [{ text: `Απάντησε στα Ελληνικά βάσει αυτών των δεδομένων: ${context}` }] }
-                        })
-                    });
+                    const data = await callGeminiWithRetry(input, context, currentKey);
                     
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.error?.message || "Σφάλμα API");
+                    if (data && data.candidates && data.candidates[0].content) {
+                        setChatHistory(prev => [...prev, { role: 'assistant', text: data.candidates[0].content.parts[0].text }]);
+                    } else {
+                        throw new Error("Μη αναμενόμενη απόκριση από το AI");
                     }
-
-                    const data = await response.json();
-                    setChatHistory(prev => [...prev, { role: 'assistant', text: data.candidates[0].content.parts[0].text }]);
                 } catch (err) {
                     console.error(err);
-                    setChatHistory(prev => [...prev, { role: 'assistant', text: "Σφάλμα AI. Εάν δεν χρησιμοποιείτε δικό σας API Key, βεβαιωθείτε ότι το περιβάλλον υποστηρίζει την αυτόματη σύνδεση." }]);
+                    setChatHistory(prev => [...prev, { 
+                        role: 'assistant', 
+                        text: `Παρουσιάστηκε πρόβλημα κατά την επικοινωνία με τον βοηθό AI. Παρακαλώ ελέγξτε τη σύνδεσή σας ή δοκιμάστε ξανά σε λίγο. (Σφάλμα: ${err.message})` 
+                    }]);
                 } finally {
                     setIsAiLoading(false);
                 }
@@ -271,7 +291,7 @@
                                 <label className="text-[10px] text-slate-400 font-bold uppercase px-1">Gemini API Key (Προαιρετικό)</label>
                                 <input 
                                     type="password" 
-                                    placeholder="Εισάγετε κλειδί αν έχετε" 
+                                    placeholder="Χρήση προεπιλεγμένου ή δικού σας" 
                                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                                     value={apiKey}
                                     onChange={(e) => setApiKey(e.target.value)}
@@ -316,7 +336,7 @@
                             <div>
                                 <h2 className="font-bold text-slate-700 leading-tight">AI Assistant</h2>
                                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">
-                                    {apiKey ? "Using Personal API Key" : "Using Environment Default"}
+                                    {apiKey ? "Προσωπικό API Key" : "Προεπιλογή Περιβάλλοντος"}
                                 </p>
                             </div>
                             {isScanning && (
